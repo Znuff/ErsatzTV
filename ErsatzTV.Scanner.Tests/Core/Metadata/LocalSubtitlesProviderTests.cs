@@ -80,6 +80,46 @@ public class LocalSubtitlesProviderTests
     }
 
     [Test]
+    public void Should_Resolve_Regional_Language_Tags_For_Sidecar_Subtitles()
+    {
+        var cultures = new List<CultureInfo>
+        {
+            CultureInfo.GetCultureInfo("en-US"),
+            CultureInfo.GetCultureInfo("de-DE")
+        };
+
+        var fakeFiles = new List<FakeFileEntry>
+        {
+            new(@"/Movies/Avatar (2009)/Avatar (2009).mkv"),
+            new(@"/Movies/Avatar (2009)/Avatar (2009).en-US.srt"),
+            new(@"/Movies/Avatar (2009)/Avatar (2009).de-DE.srt")
+        };
+
+        var fileSystem = new MockFileSystem(o => o.SimulatingOperatingSystem(SimulationMode.Linux));
+        IFileSystemInitializer<MockFileSystem> init = fileSystem.Initialize();
+        foreach (var file in fakeFiles)
+        {
+            init.WithFile(file.Path);
+        }
+
+        var provider = new LocalSubtitlesProvider(
+            Substitute.For<IMediaItemRepository>(),
+            Substitute.For<IMetadataRepository>(),
+            fileSystem,
+            new LocalFileSystem(fileSystem, Substitute.For<ILogger<LocalFileSystem>>()),
+            Substitute.For<ILogger<LocalSubtitlesProvider>>());
+
+        List<Subtitle> result = provider.LocateExternalSubtitles(
+            cultures,
+            @"/Movies/Avatar (2009)/Avatar (2009).mkv",
+            false);
+
+        result.Count.ShouldBe(2);
+        result.Count(s => s.Language == "eng").ShouldBe(1);
+        result.Count(s => s.Language == "deu").ShouldBe(1);
+    }
+
+    [Test]
     public void Should_Find_All_Languages_Codecs_And_Flags_With_File_Names()
     {
         // normally this will have a full list from the database, but we just need these two for testing

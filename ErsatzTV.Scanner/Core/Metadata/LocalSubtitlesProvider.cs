@@ -11,6 +11,7 @@ namespace ErsatzTV.Scanner.Core.Metadata;
 
 public class LocalSubtitlesProvider : ILocalSubtitlesProvider
 {
+    private static readonly char[] SubtitleSeparatorChars = ['.', '-', '_'];
     private readonly List<CultureInfo> _languageCodes = [];
     private readonly ILocalFileSystem _localFileSystem;
     private readonly ILogger<LocalSubtitlesProvider> _logger;
@@ -139,37 +140,19 @@ public class LocalSubtitlesProvider : ILocalSubtitlesProvider
             }
 
             string fileNameWithoutExtension = _fileSystem.Path.GetFileNameWithoutExtension(lowerFile);
-            string suffix = fileNameWithoutExtension[withoutExtension.Length..].ToLowerInvariant();
-            var forced = false;
-            var sdh = false;
-
-            if (suffix.Contains(".forced"))
-            {
-                forced = true;
-                suffix = suffix.Replace(".forced", string.Empty);
-            }
-
-            if (suffix.Contains(".sdh"))
-            {
-                sdh = true;
-                suffix = suffix.Replace(".sdh", string.Empty);
-            }
-
-
-            if (suffix.Contains(".cc"))
-            {
-                sdh = true;
-                suffix = suffix.Replace(".cc", string.Empty);
-            }
+            string suffix = GetSubtitleSuffix(fileNameWithoutExtension, withoutExtension);
+            string[] tokens = suffix.Split(SubtitleSeparatorChars, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var forced = tokens.Any(t => t.Equals("forced", StringComparison.OrdinalIgnoreCase));
+            var sdh = tokens.Any(t => t.Equals("sdh", StringComparison.OrdinalIgnoreCase) ||
+                                      t.Equals("cc", StringComparison.OrdinalIgnoreCase));
+            string? languageToken = tokens.FirstOrDefault(t => !IsSubtitleFlag(t));
 
             // use und when no language is present
-            string language = suffix.Replace(".", string.Empty);
-            language = string.IsNullOrWhiteSpace(language)
+            string language = string.IsNullOrWhiteSpace(languageToken)
                 ? "und"
-                : language[..Math.Min(3, language.Length)];
+                : languageToken;
 
-            Option<CultureInfo> maybeCulture = languageCodes.Find(ci =>
-                ci.TwoLetterISOLanguageName == language || ci.ThreeLetterISOLanguageName == language);
+            Option<CultureInfo> maybeCulture = FindMatchingCulture(languageCodes, language);
 
             if (maybeCulture.IsNone)
             {
@@ -216,6 +199,51 @@ public class LocalSubtitlesProvider : ILocalSubtitlesProvider
 
 
         return result;
+    }
+
+    private static string GetSubtitleSuffix(string fileNameWithoutExtension, string withoutExtension)
+    {
+        if (string.IsNullOrWhiteSpace(fileNameWithoutExtension))
+        {
+            return string.Empty;
+        }
+
+        string baseName = withoutExtension.ToLowerInvariant();
+        if (fileNameWithoutExtension.Equals(baseName, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        if (fileNameWithoutExtension.StartsWith(baseName, StringComparison.OrdinalIgnoreCase))
+        {
+            string suffix = fileNameWithoutExtension[baseName.Length..];
+            return suffix.StartsWith('.') || suffix.StartsWith('-') || suffix.StartsWith('_')
+                ? suffix[1..]
+                : suffix;
+        }
+
+        return fileNameWithoutExtension;
+    }
+
+    private static bool IsSubtitleFlag(string token) =>
+        token.Equals("forced", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("sdh", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("cc", StringComparison.OrdinalIgnoreCase);
+
+    private static Option<CultureInfo> FindMatchingCulture(List<CultureInfo> languageCodes, string language)
+    {
+        string normalizedLanguage = language.ToLowerInvariant();
+        string[] parts = normalizedLanguage.Split(SubtitleSeparatorChars, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string languageCode = parts.FirstOrDefault() ?? normalizedLanguage;
+        string abbreviatedLanguage = languageCode.Length > 3 ? languageCode[..3] : languageCode;
+
+        return languageCodes.Find(ci =>
+            ci.TwoLetterISOLanguageName == normalizedLanguage ||
+            ci.ThreeLetterISOLanguageName == normalizedLanguage ||
+            ci.TwoLetterISOLanguageName == languageCode ||
+            ci.ThreeLetterISOLanguageName == languageCode ||
+            ci.TwoLetterISOLanguageName == abbreviatedLanguage ||
+            ci.ThreeLetterISOLanguageName == abbreviatedLanguage);
     }
 
     protected virtual void Dispose(bool disposing)
